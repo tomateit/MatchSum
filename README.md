@@ -17,7 +17,30 @@ All code only supports running on Linux.
 
 ## Data
 
-We have already processed CNN/DailyMail dataset, you can download it through [this link](https://drive.google.com/open?id=1FG4oiQ6rknIeL2WLtXD0GWyh6pBH9-hX), unzip and move it to `./data`. It contains two versions (BERT/RoBERTa) of the dataset, a total of six files.
+We have already processed CNN/DailyMail dataset, you can download it through [this link](https://drive.google.com/open?id=1FG4oiQ6rknIeL2WLtXD0GWyh6pBH9-hX), unzip and move it to `./data`. It contains two versions (BERT/RoBERTa) of the dataset, a total of six files:
+```
+train_CNNDM_roberta.jsonl 	# 287084 lines
+test_CNNDM_roberta.jsonl  	# 11489 lines
+val_CNNDM_roberta.jsonl		# 11426 lines
+train_CNNDM_bert.jsonl    	# 287084 lines
+test_CNNDM_bert.jsonl  		# 11489 lines
+val_CNNDM_bert.jsonl 		# 11426 lines
+```
+
+The data formated as line-separated json objects with following schema:
+```
+{
+	"label"       : [int],   # len(M)
+	"text"        : [str],   # len(N)
+	"summary"     : [str]    # len(K)
+	"ext_idx"     : [int],   # len(L)
+	"indices"     : [[int]], # len(P=20)
+	"score"       : [float], # len(P)
+	"candidate_id": [[int]], # len(P)
+	"text_id"     : [int],   # len(512)
+	"summary_id"  : [int],   # len(Q)
+}
+```
 
 In addition, we have released five other processed datasets (WikiHow, PubMed, XSum, MultiNews, Reddit), which you can find [here](https://drive.google.com/file/d/1PnFCwqSzAUr78uEcA_Q15yupZ5bTAQIb/view?usp=sharing).
 
@@ -69,8 +92,13 @@ If you want to process your own data and get candidate summaries for each docume
 Then you can run the following command:
 
 ```
-python get_candidate.py --tokenizer=bert --data_path=/path/to/your_original_data.jsonl --index_path=/path/to/your_index.jsonl --write_path=/path/to/store/your_processed_data.jsonl
+python get_candidate.py \
+	--tokenizer=bert \
+	--data_path=/path/to/your_original_data.jsonl \
+	--index_path=/path/to/your_index.jsonl \
+	--write_path=/path/to/store/your_processed_data.jsonl \
 ```
+
 
 Please fill your ROUGE path in `preprocess/get_candidate.py` line 22 before running this command. It is worth noting that you need to adjust the number of candidate summaries and the number of sentences in the candidate summaries according to your dataset. For details, see line 89-97 in `preprocess/get_candidate.py`.
 
