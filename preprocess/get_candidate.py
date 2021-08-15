@@ -1,26 +1,26 @@
-import os
 import argparse
-from os.path import join, exists
-import subprocess as sp
+import os
+import subprocess
 import json
 import tempfile
-import multiprocessing as mp
+import multiprocessing
 from time import time
 from datetime import timedelta
 import queue
 import logging
 from itertools import combinations
+from typing import Union, List
+from functools import partial
 
-from cytoolz import curry
-from pyrouge.utils import log
-from pyrouge import Rouge155
-
+# from pyrouge.utils import log
+# from pyrouge import Rouge155
+from pathlib import Path
 from transformers import BertTokenizer, RobertaTokenizer
 
 MAX_LEN = 512
 
 _ROUGE_PATH = '/path/to/RELEASE-1.5.5'
-temp_path = './temp' # path to store some temporary files
+TEMP_PATH = Path("./temp") # path to store some temporary files
 
 original_data, sent_ids = [], []
 
@@ -57,7 +57,7 @@ def get_rouge(path, dec):
             + ' -e {} '.format(join(_ROUGE_PATH, 'data'))
             + cmd
             + ' -a {}'.format(join(tmp_dir, 'settings.xml')))
-        output = sp.check_output(cmd.split(' '), universal_newlines=True)
+        output = subprocess.check_output(cmd.split(' '), universal_newlines=True)
 
         line = output.split('\n')
         rouge1 = float(line[3].split(' ')[3])
@@ -65,15 +65,19 @@ def get_rouge(path, dec):
         rougel = float(line[11].split(' ')[3])
     return (rouge1 + rouge2 + rougel) / 3
 
-@curry
-def get_candidates(tokenizer, cls, sep_id, idx):
+# @curry
+def get_candidates(tokenizer: Union[BertTokenizer, RobertaTokenizer], cls: str, sep_id: List[int], idx: int):
 
-    idx_path = join(temp_path, str(idx))
-    
     # create some temporary files to calculate ROUGE
-    sp.call('mkdir ' + idx_path, shell=True)
-    sp.call('mkdir ' + join(idx_path, 'decode'), shell=True)
-    sp.call('mkdir ' + join(idx_path, 'reference'), shell=True)
+    idx_path = TEMP_PATH / str(idx)
+    reference_dir = idx_path / "reference"
+    decode_dir = idx_path / "decode"
+    
+    idx_path.mkdir()
+    reference_dir.mkdir()
+    decode_dir.mkdir()
+    
+
     
     # load data
     data = {}
@@ -81,14 +85,15 @@ def get_candidates(tokenizer, cls, sep_id, idx):
     data['summary'] = original_data[idx]['summary']
     
     # write reference summary to temporary files
-    ref_dir = join(idx_path, 'reference')
-    with open(join(ref_dir, '0.ref'), 'w') as f:
+    
+    with open((reference_dir / '0.ref'), 'w') as f:
         for sentence in data['summary']:
             print(sentence, file=f)
 
     # get candidate summaries
-    # here is for CNN/DM: truncate each document into the 5 most important sentences (using BertExt), 
-    # then select any 2 or 3 sentences to form a candidate summary, so there are C(5,2)+C(5,3)=20 candidate summaries.
+    # here is for CNN/DM: 
+    #   - truncate each document into the 5 most important sentences (using BertExt), 
+    #   - then select any 2 or 3 sentences to form a candidate summary, so there are C(5,2)+C(5,3)=20 candidate summaries.
     # if you want to process other datasets, you may need to adjust these numbers according to specific situation.
     sent_id = sent_ids[idx]['sent_id'][:5]
     indices = list(combinations(sent_id, 2))
@@ -154,11 +159,11 @@ def get_candidates(tokenizer, cls, sep_id, idx):
     data['summary_id'] = token_ids
     
     # write processed data to temporary file
-    processed_path = join(temp_path, 'processed')
-    with open(join(processed_path, '{}.json'.format(idx)), 'w') as f:
+    processed_path = os.path.join(TEMP_PATH, 'processed')
+    with open(os.path.join(processed_path, '{}.json'.format(idx)), 'w') as f:
         json.dump(data, f, indent=4) 
     
-    sp.call('rm -r ' + idx_path, shell=True)
+    subprocess.call('rm -r ' + idx_path, shell=True)
 
 def get_candidates_mp(args):
     
@@ -178,16 +183,16 @@ def get_candidates_mp(args):
     n_files = len(original_data)
     assert len(sent_ids) == len(original_data)
     print('total {} documents'.format(n_files))
-    os.makedirs(temp_path)
-    processed_path = join(temp_path, 'processed')
+    os.makedirs(TEMP_PATH)
+    processed_path = join(TEMP_PATH, 'processed')
     os.makedirs(processed_path)
 
     # use multi-processing to get candidate summaries
     start = time()
     print('start getting candidates with multi-processing !!!')
     
-    with mp.Pool() as pool:
-        list(pool.imap_unordered(get_candidates(tokenizer, cls, sep_id), range(n_files), chunksize=64))
+    with multiprocessing.Pool() as pool:
+        list(pool.imap_unordered(partial(get_candidates, tokenizer, cls, sep_id), range(n_files), chunksize=64))
     
     print('finished in {}'.format(timedelta(seconds=time()-start)))
     
@@ -199,7 +204,7 @@ def get_candidates_mp(args):
         with open(args.write_path, 'a') as f:
             print(json.dumps(data), file=f)
     
-    os.system('rm -r {}'.format(temp_path))
+    os.system('rm -r {}'.format(TEMP_PATH))
 
 if __name__ == '__main__':
     
@@ -216,8 +221,8 @@ if __name__ == '__main__':
         help='path to store the processed dataset')
 
     args = parser.parse_args()
-    assert args.tokenizer in ['bert', 'roberta']
-    assert exists(args.data_path)
-    assert exists(args.index_path)
+    assert args.tokenizer.lower() in ['bert', 'roberta']
+    assert os.path.exists(args.data_path)
+    assert os.path.exists(args.index_path)
 
     get_candidates_mp(args)
