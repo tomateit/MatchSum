@@ -38,7 +38,7 @@ class MatchSum(nn.Module):
         assert summary_emb.size() == (batch_size, self.hidden_size) # [batch_size, hidden_size]
 
         # get summary score
-        summary_score = torch.cosine_similarity(summary_emb, doc_emb, dim=-1)
+        summary_score = nn.functional.cosine_similarity(summary_emb, doc_emb, dim=-1)
 
         # get candidate embedding
         candidate_num = candidate_id.size(1)
@@ -50,7 +50,7 @@ class MatchSum(nn.Module):
         
         # get candidate score
         doc_emb = doc_emb.unsqueeze(1).expand_as(candidate_emb)
-        score = torch.cosine_similarity(candidate_emb, doc_emb, dim=-1) # [batch_size, candidate_num]
+        score = nn.functional.cosine_similarity(candidate_emb, doc_emb, dim=-1) # [batch_size, candidate_num]
         assert score.size() == (batch_size, candidate_num)
 
         return {'score': score, 'summary_score': summary_score}
