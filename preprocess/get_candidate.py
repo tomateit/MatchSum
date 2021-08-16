@@ -9,161 +9,139 @@ from datetime import timedelta
 import queue
 import logging
 from itertools import combinations
-from typing import Union, List
+from typing import Union, List, Dict
 from functools import partial
 
-# from pyrouge.utils import log
-# from pyrouge import Rouge155
+from rouge import Rouge
 from pathlib import Path
-from transformers import BertTokenizer, RobertaTokenizer
+from transformers import AutoTokenizer
+
+rouge = Rouge()
+# scores = rouge.get_scores(hypothesis, reference)
+# [
+#   {
+#     "rouge-1": {
+#       "f": 0.4786324739396596,
+#       "p": 0.6363636363636364,
+#       "r": 0.3835616438356164
+#     },
+#     "rouge-2": {
+#       "f": 0.2608695605353498,
+#       "p": 0.3488372093023256,
+#       "r": 0.20833333333333334
+#     },
+#     "rouge-l": {
+#       "f": 0.44705881864636676,
+#       "p": 0.5277777777777778,
+#       "r": 0.3877551020408163
+#     }
+#   }
+# ]
+
+def get_rouge(hypothesis, reference)-> float:
+    scores = rouge.get_scores(hypothesis, reference)[0]
+    mean_f = sum([value["f"] for value in scores]) / 3
+    return mean_f
 
 MAX_LEN = 512
 
-_ROUGE_PATH = '/path/to/RELEASE-1.5.5'
 TEMP_PATH = Path("./temp") # path to store some temporary files
 
 original_data, sent_ids = [], []
 
-def load_jsonl(data_path):
+def load_jsonl(data_path) -> List[Dict]:
     data = []
     with open(data_path) as f:
         for line in f:
             data.append(json.loads(line))
     return data
 
-def get_rouge(path, dec):
-    log.get_global_console_logger().setLevel(logging.WARNING)
-    dec_pattern = '(\d+).dec'
-    ref_pattern = '#ID#.ref'
-    dec_dir = join(path, 'decode')
-    ref_dir = join(path, 'reference')
 
-    with open(join(dec_dir, '0.dec'), 'w') as f:
-        for sentence in dec:
-            print(sentence, file=f)
 
-    cmd = '-c 95 -r 1000 -n 2 -m'
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        Rouge155.convert_summaries_to_rouge_format(
-            dec_dir, join(tmp_dir, 'dec'))
-        Rouge155.convert_summaries_to_rouge_format(
-            ref_dir, join(tmp_dir, 'ref'))
-        Rouge155.write_config_static(
-            join(tmp_dir, 'dec'), dec_pattern,
-            join(tmp_dir, 'ref'), ref_pattern,
-            join(tmp_dir, 'settings.xml'), system_id=1
-        )
-        cmd = (join(_ROUGE_PATH, 'ROUGE-1.5.5.pl')
-            + ' -e {} '.format(join(_ROUGE_PATH, 'data'))
-            + cmd
-            + ' -a {}'.format(join(tmp_dir, 'settings.xml')))
-        output = subprocess.check_output(cmd.split(' '), universal_newlines=True)
+def get_candidates(tokenizer, cls: str, sep_id: List[int], idx: int):
+    """
+     The whole function is based around idx parameter
+     which is passed during multiprocessed execution and points on a specific position
+     of globally preloaded files of text+summary and sentence index ranking
+    """
 
-        line = output.split('\n')
-        rouge1 = float(line[3].split(' ')[3])
-        rouge2 = float(line[7].split(' ')[3])
-        rougel = float(line[11].split(' ')[3])
-    return (rouge1 + rouge2 + rougel) / 3
-
-# @curry
-def get_candidates(tokenizer: Union[BertTokenizer, RobertaTokenizer], cls: str, sep_id: List[int], idx: int):
-
-    # create some temporary files to calculate ROUGE
-    idx_path = TEMP_PATH / str(idx)
-    reference_dir = idx_path / "reference"
-    decode_dir = idx_path / "decode"
-    
-    idx_path.mkdir()
-    reference_dir.mkdir()
-    decode_dir.mkdir()
     
 
     
     # load data
     data = {}
-    data['text'] = original_data[idx]['text']
+    data["text"] = original_data[idx]['text']
     data['summary'] = original_data[idx]['summary']
     
-    # write reference summary to temporary files
-    
-    with open((reference_dir / '0.ref'), 'w') as f:
-        for sentence in data['summary']:
-            print(sentence, file=f)
 
-    # get candidate summaries
+    # get candidate summaries FROM PRELOADED FILE
     # here is for CNN/DM: 
     #   - truncate each document into the 5 most important sentences (using BertExt), 
     #   - then select any 2 or 3 sentences to form a candidate summary, so there are C(5,2)+C(5,3)=20 candidate summaries.
     # if you want to process other datasets, you may need to adjust these numbers according to specific situation.
-    sent_id = sent_ids[idx]['sent_id'][:5]
-    indices = list(combinations(sent_id, 2))
-    indices += list(combinations(sent_id, 3))
-    if len(sent_id) < 2:
-        indices = [sent_id]
+    TOP_MOST_IMPORTANT_SENTENCES = 5
+    sent_id = sent_ids[idx]['sent_id'][:TOP_MOST_IMPORTANT_SENTENCES]
+    data['ext_idx'] = sent_id # store our ranked sentences
+
+    candidate_summary_indices = list(combinations(sent_id, 2)) + list(combinations(sent_id, 3))
     
+    # if the whole article consists only of 1 sentence
+    if len(sent_id) < 2:
+        candidate_summary_indices = [sent_id]
+
+
     # get ROUGE score for each candidate summary and sort them in descending order
-    score = []
-    for i in indices:
-        i = list(i)
-        i.sort()
-        # write dec
-        dec = []
-        for j in i:
-            sent = data['text'][j]
-            dec.append(sent)
-        score.append((i, get_rouge(idx_path, dec)))
+    score = [] # (candidate_index, rouge_score)
+    target_summary_as_text = " ".join(data["summary"])
+    for candidate_summary_index in candidate_summary_indices:
+        candidate_summary_index = sorted(candidate_summary_index)
+        # get text from summary indices
+        candidate_summary_as_text = ""
+        for sentence_index in candidate_summary_index:
+            sentence = data['text'][sentence_index]
+            candidate_summary_as_text += " " + sentence
+        # compare it with overall summary
+        score = get_rouge(candidate_summary_as_text, target_summary_as_text)
+        score.append((candidate_summary_index, score))
     score.sort(key=lambda x : x[1], reverse=True)
     
+    
     # write candidate indices and score
-    data['ext_idx'] = sent_id
-    data['indices'] = []
-    data['score'] = []
-    for i, R in score:
-        data['indices'].append(list(map(int, i)))
-        data['score'].append(R)
+    data['indices'] = [] # indices of candidate_id, but sorted by rouge score
+    data['score'] = [] # rouge scores matching candidate indices
+    for candidate_summary_index, rouge_score in score:
+        data['indices'].append(list(map(int, candidate_summary_index)))
+        data['score'].append(rouge_score)
 
-    # tokenize and get candidate_id
-    candidate_summary = []
-    for i in data['indices']:
+    # tokenize candidate summary 
+    candidate_summaries_as_text = [] # keeping in mind that these are sorted by rouge
+    for candidate_summary_indices in data['indices']:
         cur_summary = [cls]
-        for j in i:
-            cur_summary += data['text'][j].split()
+        for sentence_index in candidate_summary_indices:
+            cur_summary += data['text'][sentence_index].split()
         cur_summary = cur_summary[:MAX_LEN]
         cur_summary = ' '.join(cur_summary)
-        candidate_summary.append(cur_summary)
+        candidate_summaries_as_text.append(cur_summary)
     
-    data['candidate_id'] = []
-    for summary in candidate_summary:
-        token_ids = tokenizer.encode(summary, add_special_tokens=False)[:(MAX_LEN - 1)]
-        token_ids += sep_id
-        data['candidate_id'].append(token_ids)
+    tokenized_summaries = []
+    for summary in candidate_summaries_as_text:
+        tokenized_summary = tokenizer(summary)
+        tokenized_summaries.append(tokenized_summary)
+    data['candidate_id'] = tokenized_summaries
     
-    # tokenize and get text_id
-    text = [cls]
-    for sent in data['text']:
-        text += sent.split()
-    text = text[:MAX_LEN]
-    text = ' '.join(text)
-    token_ids = tokenizer.encode(text, add_special_tokens=False)[:(MAX_LEN - 1)]
-    token_ids += sep_id
-    data['text_id'] = token_ids
-    
-    # tokenize and get summary_id
-    summary = [cls]
-    for sent in data['summary']:
-        summary += sent.split()
-    summary = summary[:MAX_LEN]
-    summary = ' '.join(summary)
-    token_ids = tokenizer.encode(summary, add_special_tokens=False)[:(MAX_LEN - 1)]
-    token_ids += sep_id
-    data['summary_id'] = token_ids
+    # tokenize texts
+    tokenized_text = tokenizer(" ".join(data['text'])
+    data['text_id'] = tokenized_text
+
+    # tokenize summary
+    tokenized_summary = tokenizer(" ".join(data["summary"]))
+    data["summary_id"] = tokenized_summary
     
     # write processed data to temporary file
     processed_path = os.path.join(TEMP_PATH, 'processed')
-    with open(os.path.join(processed_path, '{}.json'.format(idx)), 'w') as f:
-        json.dump(data, f, indent=4) 
+    with open(os.path.join(processed_path, '{}.json'.format(idx)), 'w') as fout:
+        json.dump(data, fout, indent=4) 
     
-    subprocess.call('rm -r ' + idx_path, shell=True)
 
 def get_candidates_mp(args):
     
@@ -180,6 +158,7 @@ def get_candidates_mp(args):
     global original_data, sent_ids
     original_data = load_jsonl(args.data_path)
     sent_ids = load_jsonl(args.index_path)
+
     n_files = len(original_data)
     assert len(sent_ids) == len(original_data)
     print('total {} documents'.format(n_files))

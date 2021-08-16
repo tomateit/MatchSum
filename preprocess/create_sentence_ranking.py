@@ -26,13 +26,18 @@ def sort_vectors_by_centroid_distance(vecs: List[torch.Tensor]) -> List[int]:
     return np.argsort(dists_to_centroid).tolist()
 
 def create_ranking(arguments):
-    input_path = Path(arguments.data_path).resolve()
+    input_file = Path(arguments.file_path).resolve()
+    if not input_file.exists():
+        raise Exception("File must exist")
+    if input_file.is_dir():
+        raise Exception("Provide path to file, not dir")
+
     output_path = Path(arguments.write_path).resolve()
     output_path.mkdir(exist_ok=True)
     output_file = output_path / "sent_id.jsonl"
 
-    tokenize = partial(tokenizer, padding=True, truncation=True, max_length=128, return_tensors='pt')
-    data = load_jsonl(input_path)
+    tokenize = partial(tokenizer, padding=True, truncation=True, max_length=512, return_tensors='pt')
+    data = load_jsonl(input_file)
     rankings = []
     for chunk in tqdm(data):
         tokenized_sents = tokenize(chunk["text"])
@@ -56,10 +61,10 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         description='Create sentence ranking for futher truncation'
     )
-    parser.add_argument('--data_path', type=str, required=True,
-        help='Path to the original dataset in a form of {text: [str], summary: [str]}')
+    parser.add_argument('--file_path', type=str, required=True,
+        help='Path to the original dataset file in a form of {text: [str], summary: [str]}')
     parser.add_argument('--write_path', type=str, required=True,
-        help='Path to store the rankings {sent_id: [int]}')
+        help='Path to dir to store the rankings {sent_id: [int]}')
 
     args = parser.parse_args()  
 

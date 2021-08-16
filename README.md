@@ -33,12 +33,12 @@ The data formated as line-separated json objects with following schema:
 	"label"       : [int],   # len(M)
 	"text"        : [str],   # len(N)
 	"summary"     : [str]    # len(K)
-	"ext_idx"     : [int],   # len(L)
-	"indices"     : [[int]], # len(P=20)
-	"score"       : [float], # len(P)
-	"candidate_id": [[int]], # len(P)
-	"text_id"     : [int],   # len(512)
-	"summary_id"  : [int],   # len(Q)
+	"ext_idx"     : [int],   # len(L) sorted by score sentence indices 
+	"candidate_id": [[int]], # len(P=20) candidate summary as source text sentence indices
+	"indices"     : [[int]], # len(P=20) indices of candidate_id, but sorted by rouge score from below
+	"score"       : [float], # len(P=20) modified rouge metric for the candidate summary in desc order
+	"text_id"     : [int],   # len(512) tokenized text truncated
+	"summary_id"  : [int],   # len(Q) joined summary sentences tokenized by bert/roberta tokenizer (w\ special tokens around)
 }
 ```
 
@@ -87,7 +87,13 @@ Besides, the pre-trained models on other datasets can be found [here](https://dr
 
 ## Process Your Own Data
 
-If you want to process your own data and get candidate summaries for each document, first you need to convert your dataset to the same *jsonl* format as ours, and make sure to include *text* and *summary* fields. Second, you should use BertExt or other methods to select some important sentences from each document and get an *index.jsonl* file (we provide an example in `./preprocess/test_cnndm.jsonl`).
+If you want to process your own data and get candidate summaries for each document, first you need to convert your dataset to the same *jsonl* format as ours, and make sure to include *text* and *summary* fields. Second, you should use BertExt or other methods to select some important sentences from each document and get an *index.jsonl* file (we provide an example in `./preprocess/test_cnndm.jsonl`) which has the following format:
+
+```
+{
+	"sent_id": [int] # sentence ids in order of their importance
+}
+```
 
 Then you can run the following command:
 

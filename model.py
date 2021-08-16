@@ -1,39 +1,42 @@
 import torch
 from torch import nn
-from torch.nn import init
+from transformers import AutoModel
 
-from transformers import BertModel, RobertaModel
+
+
+
+
 
 class MatchSum(nn.Module):
+    """
     
-    def __init__(self, candidate_num, encoder, hidden_size=768):
+    """
+    def __init__(self, candidate_limit, encoder, hidden_size=512):
         super(MatchSum, self).__init__()
         
         self.hidden_size = hidden_size
-        self.candidate_num  = candidate_num
-        
-        if encoder == 'bert':
-            self.encoder = BertModel.from_pretrained('bert-base-uncased')
-        else:
-            self.encoder = RobertaModel.from_pretrained('roberta-base')
+        self.candidate_limit = candidate_limit
 
-    def forward(self, text_id, candidate_id, summary_id):
+        self.encoder = AutoModel.from_pretrained("cointegrated/LaBSE-en-ru")
+
+
+    def forward(self, tokenized_text, candidate_id, tokenized_summary):
         
-        batch_size = text_id.size(0)
+        batch_size = tokenized_text.size(0)
         
         pad_id = 0     # for BERT
-        if text_id[0][0] == 0:
+        if tokenized_text[0][0] == 0:
             pad_id = 1 # for RoBERTa
 
         # get document embedding
-        input_mask = ~(text_id == pad_id)
-        out = self.encoder(text_id, attention_mask=input_mask)[0] # last layer
+        input_mask = ~(tokenized_text == pad_id)
+        out = self.encoder(tokenized_text, attention_mask=input_mask)[0] # last layer
         doc_emb = out[:, 0, :]
         assert doc_emb.size() == (batch_size, self.hidden_size) # [batch_size, hidden_size]
         
         # get summary embedding
-        input_mask = ~(summary_id == pad_id)
-        out = self.encoder(summary_id, attention_mask=input_mask)[0] # last layer
+        input_mask = ~(tokenized_summary == pad_id)
+        out = self.encoder(tokenized_summary, attention_mask=input_mask)[0] # last layer
         summary_emb = out[:, 0, :]
         assert summary_emb.size() == (batch_size, self.hidden_size) # [batch_size, hidden_size]
 
